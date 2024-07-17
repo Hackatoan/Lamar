@@ -4,6 +4,10 @@ services:
     build: .
     volumes:
       - .:/usr/src/app
+      - persist-data:/usr/src/app/persist
     environment:
       - NODE_ENV=production
     restart: unless-stopped
+
+volumes:
+  persist-data:
