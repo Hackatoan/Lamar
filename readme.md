@@ -5,3 +5,4 @@ How to run
 Node: clone the repo, use example.config.json to create a config.json file, fill in config, run npm install, type node bot.js in terminal
 
 Docker: clone the repo, use example.config.json to create a config.json file, fill in config,
+git clone https://github.com/Hackatoan/Lamar
