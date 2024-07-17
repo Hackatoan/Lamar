@@ -1,5 +1,5 @@
 # Use Node.js as the base image
-FROM node:20.15.1
+FROM node:18
 
 # Set the working directory inside the container
 WORKDIR /usr/src/app
@@ -17,4 +17,4 @@ COPY . .
 # EXPOSE 3000
 
 # Command to run the application
-CMD ["node", "bot.js"]
+CMD ["npm", "start"]
