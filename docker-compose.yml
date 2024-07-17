@@ -1,0 +1,9 @@
+version: "3"
+services:
+  discord-bot:
+    build: .
+    volumes:
+      - .:/usr/src/app
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
