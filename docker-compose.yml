@@ -1,13 +1,13 @@
-version: "3"
+version: "3.8"
+
 services:
   discord-bot:
+    image: my-discord-bot
+    container_name: discord-bot
     build: .
-    volumes:
-      - .:/usr/src/app
-      - persist-data:/usr/src/app/persist
-    environment:
-      - NODE_ENV=production
     restart: unless-stopped
-
-volumes:
-  persist-data:
+    environment:
+      - DISCORD_TOKEN=your-bot-token
+      - OTHER_ENV_VAR=value
+    volumes:
+      - ./config:/app/config # If you need persistent config storage
