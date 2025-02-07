@@ -15,9 +15,9 @@ async function initStorage() {
 }
 
 // Load configuration
-const config = JSON.parse(fs.readFileSync("config.json", "utf8"));
-const botToken = config.botToken;
-const apiKey = config.apiKey;
+const botToken = process.env.BOT_TOKEN;
+const apiKey = process.env.API_KEY;
+
 
 const client = new Client({
   intents: [

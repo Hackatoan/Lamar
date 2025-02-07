@@ -1,0 +1,8 @@
+version: '3.8'
+services:
+  discord-bot:
+    build: .
+    environment:
+      - BOT_TOKEN=your-discord-bot-token
+      - API_KEY=your-google-api-key
+    restart: unless-stopped
