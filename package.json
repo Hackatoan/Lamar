@@ -1,0 +1,17 @@
+{
+  "name": "discord-bot",
+  "version": "1.0.0",
+  "description": "Discord bot using Google Generative AI API",
+  "main": "bot.js",
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "@google/generative-ai": "^1.0.0",
+    "node-persist": "^3.0.0",
+    "path": "^0.12.7"
+  },
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "author": "",
+  "license": "ISC"
+}

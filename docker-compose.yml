@@ -1,0 +1,20 @@
+version: '3'
+
+services:
+  discord-bot:
+    build: .
+    container_name: discord-bot
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - API_KEY=${API_KEY}
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"  # Adjust port as needed for your bot
+    restart: always
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge

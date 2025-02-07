@@ -1,3 +1,6 @@
+// Load environment variables
+require('dotenv').config();
+
 const { Client, GatewayIntentBits } = require("discord.js");
 const {
   GoogleGenerativeAI,
@@ -14,10 +17,9 @@ async function initStorage() {
   });
 }
 
-// Load configuration
-const config = JSON.parse(fs.readFileSync("config.json", "utf8"));
-const botToken = config.botToken;
-const apiKey = config.apiKey;
+// Use environment variables instead of reading from a JSON file
+const botToken = process.env.BOT_TOKEN;
+const apiKey = process.env.API_KEY;
 
 const client = new Client({
   intents: [
