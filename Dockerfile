@@ -5,7 +5,7 @@ FROM node:18
 WORKDIR /app
 
 # Clone the repo (this assumes the repository is public)
-RUN git clone https://github.com/yourusername/your-repo.git .
+RUN git clone https://github.com/Hackatoan/Lamar.git .
 
 # Install dependencies
 RUN npm install
