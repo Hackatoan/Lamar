@@ -8,7 +8,6 @@ module.exports = {
       
       
       function thing() {
-        console.log("sleep")
       }
       
       if (message.author.id === "760245527576313898"){

@@ -102,7 +102,6 @@ client.on("messageCreate", async (message) => {
     const historyKey = `history_${userId}`;
 
     let userHistory = (await storage.getItem(historyKey)) || [];
-    console.log(userHistory);
 
     console.log("Bot mentioned, generating response...");
 
@@ -118,7 +117,6 @@ client.on("messageCreate", async (message) => {
     try {
       const result = await chatSession.sendMessage(userMessage);
       const response = result.response.text();
-      console.log(response);
       // Add bot's response to the history
       await storage.setItem(historyKey, userHistory);
 

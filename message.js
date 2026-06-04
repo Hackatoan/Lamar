@@ -89,7 +89,6 @@ module.exports = (client, message, guild) => {
 
   //actuall ai
   if (message.content.toLowerCase().startsWith("<@!" + client.user.id + ">")) {
-    console.log(`run`);
     run();
   }
 
@@ -104,7 +103,6 @@ module.exports = (client, message, guild) => {
     const result = await chatSession.sendMessage(
       `${message.content.slice(temp.length)} + i am: + ${message.author.id}`
     );
-    console.log(result.response.text());
     message.channel.send(`<@${message.author.id}> ${result.response.text()}`);
   }
 
