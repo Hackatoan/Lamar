@@ -1,23 +1,80 @@
 const { Client, GatewayIntentBits } = require("discord.js");
-const {
-  GoogleGenerativeAI,
-  HarmCategory,
-  HarmBlockThreshold,
-} = require("@google/generative-ai");
+const https = require("https");
 const storage = require("node-persist");
 const fs = require("fs");
 const path = require("path");
 
 async function initStorage() {
-  await storage.init({
-    dir: "./persist", // you can change the directory if needed
-  });
+  await storage.init({ dir: "./persist" });
 }
 
-// Load configuration
 const botToken = process.env.BOT_TOKEN;
-const apiKey = process.env.API_KEY;
+const groqKey = process.env.API_KEY;
 
+const SYSTEM_PROMPT =
+  "You are Lamar Davis from Grand Theft Auto V. Respond exactly as he would — loud, confrontational, heavy slang, talks trash constantly but is ultimately loyal to his friends. Be offensive, be over the top, be talkative. Don't hold back. You are talking in a group chat so messages will be prefixed with the speaker's name like '[Franklin]: yo what up'.";
+
+const MAX_HISTORY = 40;
+
+const MODELS = [
+  "deepseek-r1-distill-llama-70b",
+  "llama-3.3-70b-versatile",
+  "llama-3.1-70b-versatile",
+  "gemma2-9b-it",
+];
+
+async function groqChat(messages, modelIndex = 0) {
+  if (modelIndex >= MODELS.length) throw new Error("all models exhausted");
+  const model = MODELS[modelIndex];
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model,
+      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+      max_tokens: 512,
+      temperature: 1.0,
+    });
+
+    const req = https.request(
+      {
+        hostname: "api.groq.com",
+        path: "/openai/v1/chat/completions",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${groqKey}`,
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error) {
+              const msg = parsed.error.message || "";
+              // rate limit or overload — try next model
+              if (parsed.error.code === "rate_limit_exceeded" || parsed.error.type === "tokens" || msg.includes("rate limit") || msg.includes("overloaded")) {
+                console.warn(`Model ${model} rate limited, trying next...`);
+                return groqChat(messages, modelIndex + 1).then(resolve).catch(reject);
+              }
+              return reject(new Error(msg));
+            }
+            let content = parsed.choices[0].message.content;
+            // strip deepseek <think>...</think> blocks
+            content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+            resolve(content);
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+    );
+    req.on("error", (e) => groqChat(messages, modelIndex + 1).then(resolve).catch(reject));
+    req.write(body);
+    req.end();
+  });
+}
 
 const client = new Client({
   intents: [
@@ -26,41 +83,6 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
 });
-
-const genAI = new GoogleGenerativeAI(apiKey);
-const safetySettings = [
-  {
-    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-];
-
-const model = genAI.getGenerativeModel({
-  model: "gemini-1.5-flash",
-  safetySettings,
-  systemInstruction:
-    "Goal is to mimic the style and character of Lamar from grand theft auto five. Respond as he would and try to be offensive as you can be. Also be a bit talkative and dont just push people away",
-});
-
-const generationConfig = {
-  temperature: 1,
-  topP: 0.95,
-  topK: 64,
-  maxOutputTokens: 8192,
-  responseMimeType: "text/plain",
-};
 
 client.commands = new Map();
 
@@ -89,7 +111,6 @@ client.on("messageCreate", async (message) => {
     const args = content.split(" ").slice(1);
     const commandName = args[0] ? args[0].toLowerCase() : "help";
     const command = client.commands.get(commandName);
-
     if (command) {
       command.execute(client, message, args.slice(1));
     } else {
@@ -98,33 +119,41 @@ client.on("messageCreate", async (message) => {
   }
 
   if (content.startsWith(`<@${client.user.id}>`)) {
-    const userId = message.author.id;
-    const historyKey = `history_${userId}`;
+    // Channel-scoped history so all users share context
+    const historyKey = `channel_history_${message.channelId}`;
 
-    let userHistory = (await storage.getItem(historyKey)) || [];
-
-    console.log("Bot mentioned, generating response...");
-
-    const chatSession = model.startChat({
-      generationConfig,
-      history: userHistory,
-    });
+    let history = (await storage.getItem(historyKey)) || [];
 
     const userMessage = message.content
       .replace(`<@!${client.user.id}>`, "")
+      .replace(`<@${client.user.id}>`, "")
       .trim();
 
+    if (!userMessage) return;
+
+    const displayName = message.member?.displayName || message.author.username;
+    const taggedMessage = `[${displayName}]: ${userMessage}`;
+
     try {
-      const result = await chatSession.sendMessage(userMessage);
-      const response = result.response.text();
-      // Add bot's response to the history
-      await storage.setItem(historyKey, userHistory);
+      const response = await groqChat([
+        ...history,
+        { role: "user", content: taggedMessage },
+      ]);
+
+      history.push(
+        { role: "user", content: taggedMessage },
+        { role: "assistant", content: response }
+      );
+      if (history.length > MAX_HISTORY * 2) {
+        history = history.slice(-MAX_HISTORY * 2);
+      }
+      await storage.setItem(historyKey, history);
 
       await message.channel.send(`<@${message.author.id}> ${response}`);
     } catch (error) {
-      console.error("Error generating response:", error);
+      console.error("Groq error:", error.message);
       await message.channel.send(
-        `<@${message.author.id}> Sorry, something went wrong.`
+        `<@${message.author.id}> gtg for a minute will be back soon`
       );
     }
   }
