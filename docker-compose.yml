@@ -1,0 +1,13 @@
+services:
+  lamar:
+    image: ghcr.io/hackatoan/lamar:latest
+    container_name: lamar
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - lamar-data:/app/persist
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  lamar-data:
