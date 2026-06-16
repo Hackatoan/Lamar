@@ -17,9 +17,9 @@ const SYSTEM_PROMPT =
 const MAX_HISTORY = 40;
 
 const MODELS = [
-  "deepseek-r1-distill-llama-70b",
+  "meta-llama/llama-4-maverick-17b-128e-instruct",
   "llama-3.3-70b-versatile",
-  "llama-3.1-70b-versatile",
+  "llama-3.1-8b-instant",
   "gemma2-9b-it",
 ];
 
@@ -54,8 +54,8 @@ async function groqChat(messages, modelIndex = 0) {
             if (parsed.error) {
               const msg = parsed.error.message || "";
               // rate limit or overload — try next model
-              if (parsed.error.code === "rate_limit_exceeded" || parsed.error.type === "tokens" || msg.includes("rate limit") || msg.includes("overloaded")) {
-                console.warn(`Model ${model} rate limited, trying next...`);
+              if (parsed.error.code === "rate_limit_exceeded" || parsed.error.type === "tokens" || msg.includes("rate limit") || msg.includes("overloaded") || msg.includes("decommissioned") || msg.includes("deprecated") || msg.includes("not supported") || parsed.error.code === "model_not_found") {
+                console.warn(`Model ${model} unavailable, trying next...`);
                 return groqChat(messages, modelIndex + 1).then(resolve).catch(reject);
               }
               return reject(new Error(msg));
