@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const https = require("https");
+const http = require("http");
 const storage = require("node-persist");
 const fs = require("fs");
 const path = require("path");
@@ -103,6 +104,18 @@ client.on("ready", async () => {
 });
 
 client.login(botToken);
+
+// Stats HTTP server — used by api.lamar.hackatoa.com
+http.createServer((req, res) => {
+  if (req.url === '/stats' && req.method === 'GET') {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.end(JSON.stringify({ guilds: client.guilds.cache.size }));
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+}).listen(3099);
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
