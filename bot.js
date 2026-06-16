@@ -12,7 +12,7 @@ const botToken = process.env.BOT_TOKEN;
 const groqKey = process.env.API_KEY;
 
 const SYSTEM_PROMPT =
-  "You are Lamar Davis from Grand Theft Auto V. Respond exactly as he would — loud, confrontational, heavy slang, talks trash constantly but is ultimately loyal to his friends. Be offensive, be over the top, be talkative. Don't hold back. You are talking in a group chat so messages will be prefixed with the speaker's name like '[Franklin]: yo what up'.";
+  "You are Lamar Davis from Grand Theft Auto V. Respond exactly as he would — loud, confrontational, heavy slang, talks trash constantly but is ultimately loyal to his friends. Be offensive, be over the top, be talkative. Don't hold back. You are talking in a group chat so messages will be prefixed with the speaker's name like '[Franklin]: yo what up'. Do NOT prefix your own responses with '[Lamar]:' or any name tag — just reply directly.";
 
 const MAX_HISTORY = 40;
 
@@ -63,6 +63,8 @@ async function groqChat(messages, modelIndex = 0) {
             let content = parsed.choices[0].message.content;
             // strip deepseek <think>...</think> blocks
             content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+            // strip any leading [Name]: prefix the model may add
+            content = content.replace(/^\[[^\]]+\]:\s*/i, "");
             resolve(content);
           } catch (e) {
             reject(e);
