@@ -1,5 +1,5 @@
-# Use a Node.js base image
-FROM node:18-alpine
+# Use a Node.js base image (20+ required: node-ical uses the regex `v` flag)
+FROM node:20-alpine
 
 # Set the working directory
 WORKDIR /app
