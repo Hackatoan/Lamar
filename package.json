@@ -3,6 +3,7 @@
     "@google/generative-ai": "^0.21.0",
     "discord.js": "^14.17.3",
     "dotenv": "^16.4.7",
+    "node-ical": "^0.26.1",
     "node-persist": "^4.0.4"
   }
 }

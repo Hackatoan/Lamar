@@ -4,6 +4,7 @@ const http = require("http");
 const storage = require("node-persist");
 const fs = require("fs");
 const path = require("path");
+const enforce = require("./enforce");
 
 async function initStorage() {
   await storage.init({ dir: "./persist" });
@@ -79,13 +80,20 @@ async function groqChat(messages, modelIndex = 0) {
   });
 }
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
-});
+// GuildVoiceStates is NOT privileged, so voice-kick works out of the box.
+// GuildPresences IS privileged: only request it when the portal toggle is on
+// (ENABLE_PRESENCE=true), otherwise login fails and the whole bot crashes.
+const intents = [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.MessageContent,
+  GatewayIntentBits.GuildVoiceStates,
+];
+if (process.env.ENABLE_PRESENCE === "true") {
+  intents.push(GatewayIntentBits.GuildPresences);
+}
+
+const client = new Client({ intents });
 
 client.commands = new Map();
 
@@ -98,9 +106,48 @@ for (const file of commandFiles) {
   client.commands.set(command.name, command);
 }
 
+// Slash commands (./slash/*.js exporting { data, execute })
+client.slashCommands = new Map();
+const slashDir = path.join(__dirname, "slash");
+if (fs.existsSync(slashDir)) {
+  for (const file of fs.readdirSync(slashDir).filter((f) => f.endsWith(".js"))) {
+    const cmd = require(path.join(slashDir, file));
+    client.slashCommands.set(cmd.data.name, cmd);
+  }
+}
+
 client.on("ready", async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   await initStorage();
+
+  // Register slash commands per-guild for instant availability.
+  const bodies = [...client.slashCommands.values()].map((c) => c.data.toJSON());
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      await guild.commands.set(bodies);
+    } catch (err) {
+      console.error(`Failed to register commands in ${guild.id}:`, err.message);
+    }
+  }
+
+  // Start the gaming-curfew enforcer.
+  enforce.start(client);
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  const cmd = client.slashCommands.get(interaction.commandName);
+  if (!cmd) return;
+  try {
+    await cmd.execute(interaction);
+  } catch (err) {
+    console.error(`Slash command ${interaction.commandName} error:`, err.message);
+    if (interaction.deferred || interaction.replied) {
+      interaction.followUp({ content: "Something broke.", ephemeral: true }).catch(() => {});
+    } else {
+      interaction.reply({ content: "Something broke.", ephemeral: true }).catch(() => {});
+    }
+  }
 });
 
 client.login(botToken);
