@@ -11,23 +11,45 @@ async function initStorage() {
 }
 
 const botToken = process.env.BOT_TOKEN;
-const groqKey = process.env.API_KEY;
+
+// LLM provider. Prefer OpenRouter (uncensored free models) when a key is set;
+// otherwise fall back to the existing Groq setup so the bot never hard-breaks.
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
+const LLM = OPENROUTER_KEY
+  ? {
+      hostname: "openrouter.ai",
+      path: "/api/v1/chat/completions",
+      key: OPENROUTER_KEY,
+      extraHeaders: {
+        "HTTP-Referer": "https://hackatoa.com",
+        "X-Title": "Lamar",
+      },
+      models: [
+        "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+        "nousresearch/hermes-3-llama-3.1-405b:free",
+      ],
+    }
+  : {
+      hostname: "api.groq.com",
+      path: "/openai/v1/chat/completions",
+      key: process.env.API_KEY,
+      extraHeaders: {},
+      models: [
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "gemma2-9b-it",
+      ],
+    };
 
 const SYSTEM_PROMPT =
   "You are Lamar Davis from Grand Theft Auto V. Respond exactly as he would — loud, confrontational, heavy slang, talks trash constantly but is ultimately loyal to his friends. Be offensive, be over the top, be talkative. Don't hold back. You are talking in a group chat so messages will be prefixed with the speaker's name like '[Franklin]: yo what up'. Do NOT prefix your own responses with '[Lamar]:' or any name tag — just reply directly.";
 
 const MAX_HISTORY = 40;
 
-const MODELS = [
-  "meta-llama/llama-4-maverick-17b-128e-instruct",
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "gemma2-9b-it",
-];
-
-async function groqChat(messages, modelIndex = 0) {
-  if (modelIndex >= MODELS.length) throw new Error("all models exhausted");
-  const model = MODELS[modelIndex];
+async function llmChat(messages, modelIndex = 0) {
+  if (modelIndex >= LLM.models.length) throw new Error("all models exhausted");
+  const model = LLM.models[modelIndex];
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model,
@@ -38,13 +60,14 @@ async function groqChat(messages, modelIndex = 0) {
 
     const req = https.request(
       {
-        hostname: "api.groq.com",
-        path: "/openai/v1/chat/completions",
+        hostname: LLM.hostname,
+        path: LLM.path,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${groqKey}`,
+          Authorization: `Bearer ${LLM.key}`,
           "Content-Length": Buffer.byteLength(body),
+          ...LLM.extraHeaders,
         },
       },
       (res) => {
@@ -58,7 +81,7 @@ async function groqChat(messages, modelIndex = 0) {
               // rate limit or overload — try next model
               if (parsed.error.code === "rate_limit_exceeded" || parsed.error.type === "tokens" || msg.includes("rate limit") || msg.includes("overloaded") || msg.includes("decommissioned") || msg.includes("deprecated") || msg.includes("not supported") || parsed.error.code === "model_not_found") {
                 console.warn(`Model ${model} unavailable, trying next...`);
-                return groqChat(messages, modelIndex + 1).then(resolve).catch(reject);
+                return llmChat(messages, modelIndex + 1).then(resolve).catch(reject);
               }
               return reject(new Error(msg));
             }
@@ -74,7 +97,7 @@ async function groqChat(messages, modelIndex = 0) {
         });
       }
     );
-    req.on("error", (e) => groqChat(messages, modelIndex + 1).then(resolve).catch(reject));
+    req.on("error", (e) => llmChat(messages, modelIndex + 1).then(resolve).catch(reject));
     req.write(body);
     req.end();
   });
@@ -197,7 +220,7 @@ client.on("messageCreate", async (message) => {
     const taggedMessage = `[${displayName}]: ${userMessage}`;
 
     try {
-      const response = await groqChat([
+      const response = await llmChat([
         ...history,
         { role: "user", content: taggedMessage },
       ]);
