@@ -14,32 +14,84 @@ const GAME_FILTER = (process.env.GAME_FILTER || "").toLowerCase();
 const CHECK_INTERVAL_MS = 60 * 1000;
 const NUDGE_COOLDOWN_MS = 10 * 60 * 1000; // don't spam the "get off the game" DM
 
-const BYPASS_KEY = "curfew_bypass_until"; // ISO string timestamp
+// Grace window after he leaves voice, so swapping devices (phone -> PlayStation)
+// doesn't burn the pass.
+const GRACE_MS = parseInt(process.env.BYPASS_GRACE_MS, 10) || 5 * 60 * 1000;
+const BYPASS_KEY = "curfew_bypass"; // { phase, armedUntil, graceUntil }
 let lastNudgeAt = 0;
 
 // ---- bypass state -----------------------------------------------------------
+// Session-based: /bypass "arms" a pass; his next voice join consumes it and he's
+// exempt until he leaves the call. Leaving opens a short grace window; if he
+// doesn't rejoin within it, the pass is spent.
+//
+//   phase "armed"  -> poll passed, waiting for him to join a call
+//   phase "active" -> in a call, exempt from enforcement
+//   phase "grace"  -> just left; still exempt until graceUntil (device swap)
 
-async function getBypassUntil() {
-  const v = await storage.getItem(BYPASS_KEY);
-  return v ? new Date(v) : null;
+async function getBypass() {
+  return (await storage.getItem(BYPASS_KEY)) || null;
 }
-
-async function isBypassActive() {
-  const until = await getBypassUntil();
-  return !!until && until > new Date();
+async function setBypass(state) {
+  await storage.setItem(BYPASS_KEY, state);
 }
-
-// Grant a pass for the rest of the current non-free stretch (until the next
-// free-time block begins). Falls back to 2h if the schedule has nothing coming.
-async function grantBypass() {
-  const next = await nextFreeStart(new Date());
-  const until = next || new Date(Date.now() + 2 * 3600 * 1000);
-  await storage.setItem(BYPASS_KEY, until.toISOString());
-  return until;
-}
-
 async function clearBypass() {
   await storage.removeItem(BYPASS_KEY);
+}
+
+// Arm a pass after a successful /bypass poll. If he's already in a call it goes
+// straight to an active session so he isn't kicked before he can use it.
+async function armBypass(inVoiceNow) {
+  const next = await nextFreeStart(new Date());
+  // An unused arm only makes sense for the current non-free stretch.
+  const armedUntil = (next || new Date(Date.now() + 2 * 3600 * 1000)).toISOString();
+  await setBypass({ phase: inVoiceNow ? "active" : "armed", armedUntil });
+  return { armedUntil: new Date(armedUntil), active: !!inVoiceNow };
+}
+
+// Is he exempt right now? Only during an active call session or its grace window.
+// An "armed" pass does NOT exempt yet — it waits for him to actually join.
+async function isBypassActive() {
+  const b = await getBypass();
+  if (!b) return false;
+  const now = new Date();
+  if (b.phase === "active") return true;
+  if (b.phase === "grace") {
+    if (b.graceUntil && new Date(b.graceUntil) > now) return true;
+    await clearBypass(); // grace elapsed without a rejoin — pass spent
+    return false;
+  }
+  if (b.phase === "armed" && b.armedUntil && new Date(b.armedUntil) < now) {
+    await clearBypass(); // never used before free time came around
+  }
+  return false;
+}
+
+// He joined voice: consume an armed pass (or resume from grace) into an active
+// session. Returns true if he's now bypassed.
+async function onTargetJoin() {
+  const b = await getBypass();
+  if (!b) return false;
+  const now = new Date();
+  const armedOk = b.phase === "armed" && (!b.armedUntil || new Date(b.armedUntil) > now);
+  const graceOk = b.phase === "grace" && (!b.graceUntil || new Date(b.graceUntil) > now);
+  if (armedOk || graceOk || b.phase === "active") {
+    await setBypass({ phase: "active", armedUntil: b.armedUntil });
+    return true;
+  }
+  return false;
+}
+
+// He left voice: open the grace window (only meaningful from an active session).
+async function onTargetLeave() {
+  const b = await getBypass();
+  if (b && b.phase === "active") {
+    await setBypass({
+      phase: "grace",
+      armedUntil: b.armedUntil,
+      graceUntil: new Date(Date.now() + GRACE_MS).toISOString(),
+    });
+  }
 }
 
 // ---- enforcement ------------------------------------------------------------
@@ -107,19 +159,34 @@ async function sweep(client) {
 }
 
 function start(client) {
-  // Event-driven: react the instant he joins voice or fires up a game...
-  client.on("voiceStateUpdate", (_old, next) => {
-    if (next.id === TARGET_USER_ID && next.channelId) {
-      enforceMember(next.member).catch(() => {});
+  // Voice: drive the session-based bypass, and enforce on join.
+  client.on("voiceStateUpdate", async (oldS, newS) => {
+    if (oldS.id !== TARGET_USER_ID && newS.id !== TARGET_USER_ID) return;
+    const joined = !oldS.channelId && newS.channelId;
+    const left = oldS.channelId && !newS.channelId;
+    try {
+      if (joined) {
+        // Consume an armed/grace pass into an active session first...
+        const bypassed = await onTargetJoin();
+        if (!bypassed) await enforceMember(newS.member); // ...otherwise enforce
+      } else if (left) {
+        await onTargetLeave(); // open device-swap grace
+      } else if (newS.channelId) {
+        // channel switch / other in-voice update
+        if (!(await isBypassActive())) await enforceMember(newS.member);
+      }
+    } catch (err) {
+      console.error("[enforce] voice handler error:", err.message);
     }
   });
+
   client.on("presenceUpdate", (_old, next) => {
     if (next?.userId === TARGET_USER_ID && next.member) {
       enforceMember(next.member).catch(() => {});
     }
   });
 
-  // ...plus a periodic sweep as a safety net (covers bypass expiry, curfew
+  // ...plus a periodic sweep as a safety net (bypass/grace expiry, curfew
   // starting while he's already in voice, missed events, etc.).
   setInterval(() => sweep(client), CHECK_INTERVAL_MS);
   sweep(client);
@@ -129,9 +196,12 @@ function start(client) {
 
 module.exports = {
   start,
-  grantBypass,
+  armBypass,
   clearBypass,
   isBypassActive,
-  getBypassUntil,
+  getBypass,
+  onTargetJoin,
+  onTargetLeave,
+  GRACE_MS,
   TARGET_USER_ID,
 };

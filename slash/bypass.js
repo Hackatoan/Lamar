@@ -2,7 +2,8 @@
 //
 // The target pleads to stay on during curfew. The group votes. If at least 2
 // people vote "kick him", the bypass is DENIED and enforcement stands. Otherwise
-// he gets a pass for the rest of the current non-free block.
+// the pass is ARMED: his next voice join makes him exempt until he leaves the
+// call (with a short grace window to swap devices).
 
 const {
   SlashCommandBuilder,
@@ -30,14 +31,25 @@ async function execute(interaction) {
     });
   }
 
-  if (await enforce.isBypassActive()) {
-    const until = await enforce.getBypassUntil();
-    return interaction.reply({
-      content: `A bypass is already active until <t:${Math.floor(
-        until.getTime() / 1000
-      )}:t>.`,
-      ephemeral: true,
-    });
+  const existing = await enforce.getBypass();
+  if (existing) {
+    const now = new Date();
+    const stale =
+      existing.phase === "armed" && existing.armedUntil && new Date(existing.armedUntil) < now;
+    const graceGone =
+      existing.phase === "grace" && existing.graceUntil && new Date(existing.graceUntil) < now;
+    if (!stale && !graceGone) {
+      const label =
+        existing.phase === "armed"
+          ? "armed — hop in a call to use it"
+          : existing.phase === "grace"
+          ? "still good (grace period)"
+          : "already active";
+      return interaction.reply({
+        content: `You already got a pass ${label}. 😤`,
+        ephemeral: true,
+      });
+    }
   }
 
   const kickBtn = new ButtonBuilder()
@@ -95,12 +107,21 @@ async function execute(interaction) {
         `❌ **Bypass denied** — ${kickVotes.size} voted to kick him. ` +
         `Curfew stands. Get off, <@${enforce.TARGET_USER_ID}>.`;
     } else {
-      const until = await enforce.grantBypass();
-      resultText =
-        `✅ **Bypass granted** — only ${kickVotes.size} vote(s) to kick. ` +
-        `<@${enforce.TARGET_USER_ID}> is clear until <t:${Math.floor(
-          until.getTime() / 1000
-        )}:t>. Enjoy it.`;
+      let inVoice = false;
+      try {
+        const m = await interaction.guild.members.fetch(enforce.TARGET_USER_ID);
+        inVoice = !!(m.voice && m.voice.channelId);
+      } catch {
+        /* ignore */
+      }
+      const { active } = await enforce.armBypass(inVoice);
+      const graceMin = Math.round(enforce.GRACE_MS / 60000);
+      resultText = active
+        ? `✅ **Bypass granted** — only ${kickVotes.size} vote(s) to kick. ` +
+          `<@${enforce.TARGET_USER_ID}> you're already in the call, so you're clear until you leave.`
+        : `✅ **Bypass granted** — only ${kickVotes.size} vote(s) to kick. ` +
+          `<@${enforce.TARGET_USER_ID}> jump in a call and you're good until you leave ` +
+          `(${graceMin}-min grace so you can swap devices).`;
     }
 
     const resultEmbed = EmbedBuilder.from(embed)
