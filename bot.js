@@ -28,8 +28,20 @@ const GROQ = process.env.API_KEY && {
   key: process.env.API_KEY,
   extraHeaders: {},
 };
+// Gemini via Google's OpenAI-compatible endpoint. For 2.5+ models the
+// configurable safety filters default to OFF, so it's permissive (swears, edgy)
+// while running on reliable Google infra — a good primary when a key is set.
+const GEMINI = process.env.GEMINI_API_KEY && {
+  hostname: "generativelanguage.googleapis.com",
+  path: "/v1beta/openai/chat/completions",
+  key: process.env.GEMINI_API_KEY,
+  extraHeaders: {},
+};
 
 const CHAIN = [];
+if (GEMINI) {
+  CHAIN.push({ p: GEMINI, model: "gemini-2.5-flash" });
+}
 if (OPENROUTER) {
   CHAIN.push(
     { p: OPENROUTER, model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free" },
@@ -77,21 +89,33 @@ async function llmChat(messages, modelIndex = 0) {
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
           try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) {
+            // Gemini sometimes wraps errors in an array: [{ error: {...} }]
+            const raw0 = JSON.parse(data);
+            const parsed = Array.isArray(raw0) ? raw0[0] : raw0;
+            if (parsed && parsed.error) {
               const msg = parsed.error.message || "";
-              // include OpenRouter's nested provider detail in the scan
-              const raw = ((parsed.error.metadata && parsed.error.metadata.raw) || "").toString();
-              const blob = (msg + " " + raw).toLowerCase();
+              // scan OpenRouter's nested provider detail + Gemini's status field
+              const rawmeta = ((parsed.error.metadata && parsed.error.metadata.raw) || "").toString();
+              const status = (parsed.error.status || "").toString();
+              const blob = (msg + " " + rawmeta + " " + status).toLowerCase();
               const code = parsed.error.code;
               // rate limit / overload / unavailable — try next model
-              if (code === "rate_limit_exceeded" || code === 429 || code === 503 || code === "model_not_found" || parsed.error.type === "tokens" || blob.includes("rate limit") || blob.includes("rate-limit") || blob.includes("temporarily") || blob.includes("overloaded") || blob.includes("decommissioned") || blob.includes("deprecated") || blob.includes("not supported")) {
-                console.warn(`Model ${model} unavailable (${code}), trying next...`);
+              if (code === "rate_limit_exceeded" || code === 429 || code === 500 || code === 503 || code === "model_not_found" || parsed.error.type === "tokens" || status === "UNAVAILABLE" || status === "RESOURCE_EXHAUSTED" || blob.includes("rate limit") || blob.includes("rate-limit") || blob.includes("temporarily") || blob.includes("overloaded") || blob.includes("high demand") || blob.includes("unavailable") || blob.includes("decommissioned") || blob.includes("deprecated") || blob.includes("not supported")) {
+                console.warn(`Model ${model} unavailable (${code || status}), trying next...`);
                 return llmChat(messages, modelIndex + 1).then(resolve).catch(reject);
               }
               return reject(new Error(msg));
             }
-            let content = parsed.choices[0].message.content;
+            const content0 =
+              parsed && parsed.choices && parsed.choices[0] && parsed.choices[0].message
+                ? parsed.choices[0].message.content
+                : null;
+            if (!content0) {
+              // empty/unexpected response — advance rather than failing outright
+              console.warn(`Model ${model} returned no content, trying next...`);
+              return llmChat(messages, modelIndex + 1).then(resolve).catch(reject);
+            }
+            let content = content0;
             // strip deepseek <think>...</think> blocks
             content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
             // strip any leading [Name]: prefix the model may add
