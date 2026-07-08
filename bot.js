@@ -12,35 +12,37 @@ async function initStorage() {
 
 const botToken = process.env.BOT_TOKEN;
 
-// LLM provider. Prefer OpenRouter (uncensored free models) when a key is set;
-// otherwise fall back to the existing Groq setup so the bot never hard-breaks.
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
-const LLM = OPENROUTER_KEY
-  ? {
-      hostname: "openrouter.ai",
-      path: "/api/v1/chat/completions",
-      key: OPENROUTER_KEY,
-      extraHeaders: {
-        "HTTP-Referer": "https://hackatoa.com",
-        "X-Title": "Lamar",
-      },
-      models: [
-        "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-        "nousresearch/hermes-3-llama-3.1-405b:free",
-      ],
-    }
-  : {
-      hostname: "api.groq.com",
-      path: "/openai/v1/chat/completions",
-      key: process.env.API_KEY,
-      extraHeaders: {},
-      models: [
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "gemma2-9b-it",
-      ],
-    };
+// LLM fallback chain. Each entry is {provider, model}. We try them in order,
+// advancing on any rate-limit / unavailable error. Uncensored OpenRouter models
+// go first (when a key is set); Groq is the reliable tail so Lamar never goes
+// mute when the free uncensored pool is congested (it is, often).
+const OPENROUTER = process.env.OPENROUTER_API_KEY && {
+  hostname: "openrouter.ai",
+  path: "/api/v1/chat/completions",
+  key: process.env.OPENROUTER_API_KEY,
+  extraHeaders: { "HTTP-Referer": "https://hackatoa.com", "X-Title": "Lamar" },
+};
+const GROQ = process.env.API_KEY && {
+  hostname: "api.groq.com",
+  path: "/openai/v1/chat/completions",
+  key: process.env.API_KEY,
+  extraHeaders: {},
+};
+
+const CHAIN = [];
+if (OPENROUTER) {
+  CHAIN.push(
+    { p: OPENROUTER, model: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free" },
+    { p: OPENROUTER, model: "nousresearch/hermes-3-llama-3.1-405b:free" }
+  );
+}
+if (GROQ) {
+  CHAIN.push(
+    { p: GROQ, model: "meta-llama/llama-4-maverick-17b-128e-instruct" },
+    { p: GROQ, model: "llama-3.3-70b-versatile" },
+    { p: GROQ, model: "llama-3.1-8b-instant" }
+  );
+}
 
 const SYSTEM_PROMPT =
   "You are Lamar Davis from Grand Theft Auto V. Respond exactly as he would — loud, confrontational, heavy slang, talks trash constantly but is ultimately loyal to his friends. Be offensive, be over the top, be talkative. Don't hold back. You are talking in a group chat so messages will be prefixed with the speaker's name like '[Franklin]: yo what up'. Do NOT prefix your own responses with '[Lamar]:' or any name tag — just reply directly.";
@@ -48,8 +50,8 @@ const SYSTEM_PROMPT =
 const MAX_HISTORY = 40;
 
 async function llmChat(messages, modelIndex = 0) {
-  if (modelIndex >= LLM.models.length) throw new Error("all models exhausted");
-  const model = LLM.models[modelIndex];
+  if (modelIndex >= CHAIN.length) throw new Error("all models exhausted");
+  const { p, model } = CHAIN[modelIndex];
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model,
@@ -60,14 +62,14 @@ async function llmChat(messages, modelIndex = 0) {
 
     const req = https.request(
       {
-        hostname: LLM.hostname,
-        path: LLM.path,
+        hostname: p.hostname,
+        path: p.path,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${LLM.key}`,
+          Authorization: `Bearer ${p.key}`,
           "Content-Length": Buffer.byteLength(body),
-          ...LLM.extraHeaders,
+          ...p.extraHeaders,
         },
       },
       (res) => {
@@ -78,9 +80,13 @@ async function llmChat(messages, modelIndex = 0) {
             const parsed = JSON.parse(data);
             if (parsed.error) {
               const msg = parsed.error.message || "";
-              // rate limit or overload — try next model
-              if (parsed.error.code === "rate_limit_exceeded" || parsed.error.type === "tokens" || msg.includes("rate limit") || msg.includes("overloaded") || msg.includes("decommissioned") || msg.includes("deprecated") || msg.includes("not supported") || parsed.error.code === "model_not_found") {
-                console.warn(`Model ${model} unavailable, trying next...`);
+              // include OpenRouter's nested provider detail in the scan
+              const raw = ((parsed.error.metadata && parsed.error.metadata.raw) || "").toString();
+              const blob = (msg + " " + raw).toLowerCase();
+              const code = parsed.error.code;
+              // rate limit / overload / unavailable — try next model
+              if (code === "rate_limit_exceeded" || code === 429 || code === 503 || code === "model_not_found" || parsed.error.type === "tokens" || blob.includes("rate limit") || blob.includes("rate-limit") || blob.includes("temporarily") || blob.includes("overloaded") || blob.includes("decommissioned") || blob.includes("deprecated") || blob.includes("not supported")) {
+                console.warn(`Model ${model} unavailable (${code}), trying next...`);
                 return llmChat(messages, modelIndex + 1).then(resolve).catch(reject);
               }
               return reject(new Error(msg));
