@@ -38,7 +38,7 @@ if (OPENROUTER) {
 }
 if (GROQ) {
   CHAIN.push(
-    { p: GROQ, model: "meta-llama/llama-4-maverick-17b-128e-instruct" },
+    { p: GROQ, model: "meta-llama/llama-4-scout-17b-16e-instruct" },
     { p: GROQ, model: "llama-3.3-70b-versatile" },
     { p: GROQ, model: "llama-3.1-8b-instant" }
   );
