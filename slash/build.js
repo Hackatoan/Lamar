@@ -20,13 +20,14 @@ const JOBS_DIR = process.env.LAMARLIVE_JOBS_DIR || "/jobs";
 const PUBLIC_BASE = process.env.LAMARLIVE_BASE || "https://lamarlive.hackatoa.com";
 const BUILD_ROLE_ID = process.env.BUILD_ROLE_ID || "1391691724283318312"; // NiggiWagas
 const GUILD_ID = process.env.BUILD_GUILD_ID || "1391661812918779934"; // Niggiwagas
+const ADMIN_USER_ID = process.env.BUILD_ADMIN_ID || "1063760251951792140"; // hackatoa
 const MAX_BUILDS = parseInt(process.env.BUILD_MAX, 10) || 10;
 const COOLDOWN_MS = parseInt(process.env.BUILD_COOLDOWN_MS, 10) || 120 * 1000;
 const RESULT_TIMEOUT_MS = 160 * 1000;
 
 const data = new SlashCommandBuilder()
   .setName("build")
-  .setDescription("Build & deploy a webpage with Lamar (Niggiwagas only)")
+  .setDescription("Build & deploy a webpage with Lamar (NiggiWagas role only)")
   .addSubcommand((sc) =>
     sc
       .setName("create")
@@ -45,6 +46,30 @@ const data = new SlashCommandBuilder()
       .setDescription("Delete one of your builds to free a slot")
       .addStringOption((o) =>
         o.setName("name").setDescription("The build's name/slug").setRequired(true)
+      )
+  )
+  .addSubcommandGroup((g) =>
+    g
+      .setName("admin")
+      .setDescription("Admin-only build management")
+      .addSubcommand((sc) =>
+        sc
+          .setName("list")
+          .setDescription("List all builds, or one user's")
+          .addUserOption((o) => o.setName("user").setDescription("Filter to this user"))
+      )
+      .addSubcommand((sc) =>
+        sc
+          .setName("delete")
+          .setDescription("Delete a specific user's build")
+          .addUserOption((o) => o.setName("user").setDescription("Build owner").setRequired(true))
+          .addStringOption((o) => o.setName("name").setDescription("Build slug").setRequired(true))
+      )
+      .addSubcommand((sc) =>
+        sc
+          .setName("wipe")
+          .setDescription("Wipe ALL of a user's builds")
+          .addUserOption((o) => o.setName("user").setDescription("Build owner").setRequired(true))
       )
   );
 
@@ -82,6 +107,21 @@ async function listBuilds(userId) {
   }
   builds.sort((a, b) => (b.created || 0) - (a.created || 0));
   return builds;
+}
+
+async function allUsers() {
+  let entries;
+  try {
+    entries = await fs.readdir(path.join(PAGES_DIR, "u"), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    out.push({ userId: e.name, builds: await listBuilds(e.name) });
+  }
+  return out;
 }
 
 function esc(s) {
@@ -145,16 +185,26 @@ function runBuild(prompt) {
 }
 
 async function execute(interaction) {
-  // Role gate.
+  const group = interaction.options.getSubcommandGroup(false);
+  const sub = interaction.options.getSubcommand();
+
+  // ---- admin group: hackatoa only, and bypasses the role gate ----
+  if (group === "admin") {
+    if (interaction.user.id !== ADMIN_USER_ID) {
+      return interaction.reply({ content: "🚫 `/build admin` is owner-only.", ephemeral: true });
+    }
+    return adminExecute(interaction, sub);
+  }
+
+  // ---- everything else: NiggiWagas role only ----
   const hasRole = interaction.member?.roles?.cache?.has(BUILD_ROLE_ID);
   if (!hasRole) {
     return interaction.reply({
-      content: "🚫 You need the **NiggiWagas** role to use `/build`.",
+      content: "🚫 Only members with the **NiggiWagas** role can use `/build`.",
       ephemeral: true,
     });
   }
 
-  const sub = interaction.options.getSubcommand();
   const userId = interaction.user.id;
   const displayName = interaction.member?.displayName || interaction.user.username;
 
@@ -246,6 +296,74 @@ async function execute(interaction) {
 
   const url = `${PUBLIC_BASE}/u/${userId}/${slug}/`;
   return interaction.editReply(`✅ Done! <@${userId}> your page is live: ${url}`);
+}
+
+// ---- admin handlers (hackatoa only) ----
+async function adminExecute(interaction, sub) {
+  if (sub === "list") {
+    const target = interaction.options.getUser("user");
+    if (target) {
+      const builds = await listBuilds(target.id);
+      if (!builds.length) {
+        return interaction.reply({ content: `<@${target.id}> has no builds.`, ephemeral: true });
+      }
+      const lines = builds
+        .map((b) => `• \`${b.slug}\` — ${PUBLIC_BASE}/u/${target.id}/${b.slug}/`)
+        .join("\n");
+      return interaction.reply({
+        content: `<@${target.id}> — ${builds.length}/${MAX_BUILDS}\n${lines}`,
+        ephemeral: true,
+      });
+    }
+    const users = await allUsers();
+    if (!users.length) {
+      return interaction.reply({ content: "Nobody's built anything yet.", ephemeral: true });
+    }
+    const total = users.reduce((a, u) => a + u.builds.length, 0);
+    const lines = users
+      .sort((a, b) => b.builds.length - a.builds.length)
+      .map((u) => `• <@${u.userId}> — ${u.builds.length}`)
+      .join("\n");
+    return interaction.reply({
+      content: `**${total}** build(s) across **${users.length}** user(s):\n${lines}`,
+      ephemeral: true,
+    });
+  }
+
+  const target = interaction.options.getUser("user");
+
+  if (sub === "wipe") {
+    const builds = await listBuilds(target.id);
+    await fs.rm(userDir(target.id), { recursive: true, force: true });
+    return interaction.reply({
+      content: `🗑️ Wiped ${builds.length} build(s) from <@${target.id}>.`,
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "delete") {
+    const slug = slugify(interaction.options.getString("name"));
+    const targetDir = path.join(userDir(target.id), slug);
+    if (!slug || !path.resolve(targetDir).startsWith(path.resolve(userDir(target.id)) + path.sep)) {
+      return interaction.reply({ content: "Bad build name.", ephemeral: true });
+    }
+    if (!fss.existsSync(targetDir)) {
+      return interaction.reply({ content: `<@${target.id}> has no build \`${slug}\`.`, ephemeral: true });
+    }
+    await fs.rm(targetDir, { recursive: true, force: true });
+    let name = target.username;
+    try {
+      const m = await interaction.guild.members.fetch(target.id);
+      name = m.displayName;
+    } catch {
+      /* fall back to username */
+    }
+    await writeGallery(target.id, name);
+    return interaction.reply({
+      content: `🗑️ Deleted \`${slug}\` from <@${target.id}>.`,
+      ephemeral: true,
+    });
+  }
 }
 
 module.exports = { data, execute, guildId: GUILD_ID };
