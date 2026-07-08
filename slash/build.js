@@ -366,4 +366,17 @@ async function adminExecute(interaction, sub) {
   }
 }
 
-module.exports = { data, execute, guildId: GUILD_ID };
+module.exports = {
+  data,
+  execute,
+  guildId: GUILD_ID,
+  // shared helpers reused by slash/edit.js
+  userDir,
+  listBuilds,
+  runBuild,
+  writeGallery,
+  slugify,
+  PUBLIC_BASE,
+  BUILD_ROLE_ID,
+  COOLDOWN_MS,
+};
