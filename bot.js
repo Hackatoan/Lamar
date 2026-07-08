@@ -173,9 +173,13 @@ client.on("ready", async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   await initStorage();
 
-  // Register slash commands per-guild for instant availability.
-  const bodies = [...client.slashCommands.values()].map((c) => c.data.toJSON());
+  // Register slash commands per-guild. A command may set `guildId` to restrict
+  // itself to one guild (e.g. /build); others register everywhere.
+  const all = [...client.slashCommands.values()];
   for (const guild of client.guilds.cache.values()) {
+    const bodies = all
+      .filter((c) => !c.guildId || c.guildId === guild.id)
+      .map((c) => c.data.toJSON());
     try {
       await guild.commands.set(bodies);
     } catch (err) {
