@@ -278,9 +278,14 @@ async function execute(interaction) {
 
   if (!result.ok) {
     const msg = String(result.error || "build failed");
-    const friendly = msg.startsWith("AUTH:")
-      ? "⚠️ The builder's Claude auth is expired on the host — an admin needs to re-login. Try again after."
-      : `❌ Build failed: ${msg.slice(0, 300)}`;
+    let friendly;
+    if (result.refused) {
+      friendly = `🚫 Lamar ain't building that:\n> ${msg.slice(0, 400).replace(/\n+/g, " ")}`;
+    } else if (msg.startsWith("AUTH:")) {
+      friendly = "⚠️ The builder's Claude auth is expired on the host — an admin needs to re-login. Try again after.";
+    } else {
+      friendly = `❌ Build failed: ${msg.slice(0, 300)}`;
+    }
     return interaction.editReply(friendly);
   }
 
