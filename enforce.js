@@ -20,6 +20,11 @@ const GRACE_MS = parseInt(process.env.BYPASS_GRACE_MS, 10) || 5 * 60 * 1000;
 const BYPASS_KEY = "curfew_bypass"; // { phase, armedUntil, graceUntil }
 let lastNudgeAt = 0;
 
+// In-memory flag: true while a /bypass poll is actively running.
+// Prevents kicking him during the vote window before armBypass() is called.
+let pollPending = false;
+function setPollPending(val) { pollPending = val; }
+
 // ---- bypass state -----------------------------------------------------------
 // Session-based: /bypass "arms" a pass; his next voice join consumes it and he's
 // exempt until he leaves the call. Leaving opens a short grace window; if he
@@ -107,8 +112,9 @@ async function dm(user, text) {
 async function enforceMember(member) {
   if (!member) return;
 
-  // Free time or an active bypass → hands off.
+  // Free time, active bypass, or poll currently running → hands off.
   if (await isFreeTime()) return;
+  if (pollPending) return;
   if (await isBypassActive()) return;
 
   // 1) In a voice channel during curfew → disconnect.
@@ -202,6 +208,7 @@ module.exports = {
   getBypass,
   onTargetJoin,
   onTargetLeave,
+  setPollPending,
   GRACE_MS,
   TARGET_USER_ID,
 };

@@ -71,6 +71,7 @@ async function execute(interaction) {
     )
     .setColor(0xf1c40f);
 
+  enforce.setPollPending(true);
   await interaction.reply({ embeds: [embed], components: [row] });
   const pollMsg = await interaction.fetchReply();
 
@@ -94,6 +95,7 @@ async function execute(interaction) {
   });
 
   collector.on("end", async () => {
+    enforce.setPollPending(false);
     const denied = kickVotes.size >= VETO_THRESHOLD;
     const disabledRow = new ActionRowBuilder().addComponents(
       ButtonBuilder.from(stayBtn).setDisabled(true),
