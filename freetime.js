@@ -8,10 +8,19 @@ const ical = require("node-ical");
 
 const CALENDAR_URL = process.env.CALENDAR_ICAL_URL;
 const REFRESH_MS = 5 * 60 * 1000; // re-fetch the calendar every 5 minutes
+// Minimum increase to trigger a "he added free time" alert (guards against
+// the 5-min sliding window causing false positives on each poll).
+const CHANGE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
 let cache = null; // parsed ical data
 let cacheAt = 0;
 let inFlight = null;
+let prevTotalFreeMs = null; // null = first run, set baseline silently
+let onFreeTimeAdded = null; // callback(addedMinutes) registered by bot.js
+
+function setFreeTimeChangeCallback(fn) {
+  onFreeTimeAdded = fn;
+}
 
 async function getCalendar() {
   if (!CALENDAR_URL) return null;
@@ -24,6 +33,7 @@ async function getCalendar() {
       cache = data;
       cacheAt = Date.now();
       inFlight = null;
+      _checkForAddedFreeTime(data);
       return data;
     })
     .catch((err) => {
@@ -32,6 +42,34 @@ async function getCalendar() {
       return cache; // fall back to last good copy (may be null)
     });
   return inFlight;
+}
+
+// Compute total free-time ms in the next 7 days and compare to last snapshot.
+function _checkForAddedFreeTime(data) {
+  if (!data || !onFreeTimeAdded) return;
+  const now = new Date();
+  const to = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+  const intervals = expandIntervals(data, now, to);
+  const totalMs = intervals.reduce((sum, i) => {
+    // clip to [now, to] so window drift doesn't inflate the count
+    const s = Math.max(i.start.getTime(), now.getTime());
+    const e = Math.min(i.end.getTime(), to.getTime());
+    return sum + Math.max(0, e - s);
+  }, 0);
+
+  if (prevTotalFreeMs === null) {
+    // First successful fetch — establish baseline without alerting
+    prevTotalFreeMs = totalMs;
+    return;
+  }
+
+  const diff = totalMs - prevTotalFreeMs;
+  if (diff > CHANGE_THRESHOLD_MS) {
+    const addedMinutes = Math.round(diff / 60000);
+    console.log(`[freetime] detected +${addedMinutes}min of free time added`);
+    onFreeTimeAdded(addedMinutes);
+  }
+  prevTotalFreeMs = totalMs;
 }
 
 // Expand all event occurrences (including recurring) that overlap [from, to]
@@ -119,4 +157,4 @@ async function nextFreeStart(when = new Date()) {
   return intervals.length ? intervals[0].start : null;
 }
 
-module.exports = { isFreeTime, nextFreeStart, hasCalendar: !!CALENDAR_URL };
+module.exports = { isFreeTime, nextFreeStart, hasCalendar: !!CALENDAR_URL, setFreeTimeChangeCallback };
