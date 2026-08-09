@@ -141,6 +141,7 @@ async function writeGallery(userId, displayName) {
   const html =
     `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<meta name="description" content="${esc(displayName)}'s builds on Lamar Live — pages created with /build.">` +
     `<title>${esc(displayName)}'s builds</title><style>` +
     `body{background:#0d0d10;color:#e6e6e6;font:16px/1.5 system-ui,sans-serif;max-width:820px;margin:6vh auto;padding:0 20px}` +
     `h1{font-size:1.5rem}a{color:inherit;text-decoration:none}` +
