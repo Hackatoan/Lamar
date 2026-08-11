@@ -190,20 +190,24 @@ client.on("ready", async () => {
     }
   }
 
-  // Start the gaming-curfew enforcer.
-  enforce.start(client);
+  // Gaming-curfew enforcer ("is gianni locked"). Off unless ENABLE_CURFEW=true.
+  if (process.env.ENABLE_CURFEW === "true") {
+    enforce.start(client);
 
-  // Alert the group if the target sneaks more free time onto his calendar.
-  setFreeTimeChangeCallback(async (addedMinutes) => {
-    try {
-      const ch = await client.channels.fetch(CURFEW_ALERT_CHANNEL);
-      await ch.send(
-        `📅 <@${enforce.TARGET_USER_ID}> just added **${addedMinutes} more minutes** of free time to his calendar. he's not locked in 💀`
-      );
-    } catch (err) {
-      console.error("[freetime] alert send error:", err.message);
-    }
-  });
+    // Alert the group if the target sneaks more free time onto his calendar.
+    setFreeTimeChangeCallback(async (addedMinutes) => {
+      try {
+        const ch = await client.channels.fetch(CURFEW_ALERT_CHANNEL);
+        await ch.send(
+          `📅 <@${enforce.TARGET_USER_ID}> just added **${addedMinutes} more minutes** of free time to his calendar. he's not locked in 💀`
+        );
+      } catch (err) {
+        console.error("[freetime] alert send error:", err.message);
+      }
+    });
+  } else {
+    console.log("[enforce] curfew disabled (set ENABLE_CURFEW=true to enable)");
+  }
 });
 
 client.on("interactionCreate", async (interaction) => {
