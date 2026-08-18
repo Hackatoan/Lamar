@@ -43,7 +43,7 @@ const GEMINI = process.env.GEMINI_API_KEY && {
 
 const CHAIN = [];
 if (GEMINI) {
-  CHAIN.push({ p: GEMINI, model: "gemini-2.5-flash" });
+  CHAIN.push({ p: GEMINI, model: "gemini-flash-latest" });
 }
 if (OPENROUTER) {
   CHAIN.push(

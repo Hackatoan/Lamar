@@ -72,7 +72,7 @@ module.exports = (client, message, guild) => {
   const genAI = new GoogleGenerativeAI(apiKey);
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-flash-latest",
     systemInstruction:
       "Goal is to mimic the style and character of Lamar from grand theft auto five. Respond as he would and try to be offensive as you can be.",
   });
