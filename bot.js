@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const enforce = require("./enforce");
 const { setFreeTimeChangeCallback } = require("./freetime");
+const { langKey, langSuffix } = require("./lang");
 
 const CURFEW_ALERT_CHANNEL = "1524574833625530460";
 
@@ -64,13 +65,13 @@ const SYSTEM_PROMPT =
 
 const MAX_HISTORY = 40;
 
-async function llmChat(messages, modelIndex = 0) {
+async function llmChat(messages, modelIndex = 0, systemPrompt = SYSTEM_PROMPT) {
   if (modelIndex >= CHAIN.length) throw new Error("all models exhausted");
   const { p, model } = CHAIN[modelIndex];
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model,
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+      messages: [{ role: "system", content: systemPrompt }, ...messages],
       max_tokens: 512,
       temperature: 1.0,
     });
@@ -105,7 +106,7 @@ async function llmChat(messages, modelIndex = 0) {
               // rate limit / overload / unavailable — try next model
               if (code === "rate_limit_exceeded" || code === 429 || code === 500 || code === 503 || code === "model_not_found" || parsed.error.type === "tokens" || status === "UNAVAILABLE" || status === "RESOURCE_EXHAUSTED" || blob.includes("rate limit") || blob.includes("rate-limit") || blob.includes("temporarily") || blob.includes("overloaded") || blob.includes("high demand") || blob.includes("unavailable") || blob.includes("decommissioned") || blob.includes("deprecated") || blob.includes("not supported")) {
                 console.warn(`Model ${model} unavailable (${code || status}), trying next...`);
-                return llmChat(messages, modelIndex + 1).then(resolve).catch(reject);
+                return llmChat(messages, modelIndex + 1, systemPrompt).then(resolve).catch(reject);
               }
               return reject(new Error(msg));
             }
@@ -116,7 +117,7 @@ async function llmChat(messages, modelIndex = 0) {
             if (!content0) {
               // empty/unexpected response — advance rather than failing outright
               console.warn(`Model ${model} returned no content, trying next...`);
-              return llmChat(messages, modelIndex + 1).then(resolve).catch(reject);
+              return llmChat(messages, modelIndex + 1, systemPrompt).then(resolve).catch(reject);
             }
             let content = content0;
             // strip deepseek <think>...</think> blocks
@@ -130,7 +131,7 @@ async function llmChat(messages, modelIndex = 0) {
         });
       }
     );
-    req.on("error", (e) => llmChat(messages, modelIndex + 1).then(resolve).catch(reject));
+    req.on("error", (e) => llmChat(messages, modelIndex + 1, systemPrompt).then(resolve).catch(reject));
     req.write(body);
     req.end();
   });
@@ -273,10 +274,12 @@ client.on("messageCreate", async (message) => {
     const taggedMessage = `[${displayName}]: ${userMessage}`;
 
     try {
-      const response = await llmChat([
-        ...history,
-        { role: "user", content: taggedMessage },
-      ]);
+      const lang = (await storage.getItem(langKey(message.guildId))) || "en";
+      const response = await llmChat(
+        [...history, { role: "user", content: taggedMessage }],
+        0,
+        SYSTEM_PROMPT + langSuffix(lang)
+      );
 
       history.push(
         { role: "user", content: taggedMessage },
