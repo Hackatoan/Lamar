@@ -1,51 +1,41 @@
-[![Buy Me A Coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/hackatoa)
-
 # Lamar
 
-A Discord bot inspired by Lamar from GTA V. Uses the Gemini API and Google Search to generate in-character responses.
+An AI-powered Discord bot in the voice of Lamar Davis (GTA V), with persistent memory.
+
+🔗 **Live:** [lamar.hackatoa.com](https://lamar.hackatoa.com)   ·   ☕ **Support:** [Buy Me a Coffee](https://buymeacoffee.com/hackatoa)
+
+## Overview
+
+A character Discord bot that chats in-persona using an LLM, remembers context, and can reply in the server's chosen language.
 
 ## Features
 
-- Responds in Lamar's voice using Gemini for text generation
-- Google Search integration for current-events awareness
-- **Gaming curfew** — kicks a target user from voice (and nudges them off games)
-  outside of designated free time, read from a Google Calendar iCal feed
-- `/bypass` — target can ask the group to let them stay on; 2+ "kick him" votes
-  vetoes it, otherwise they get a pass for the rest of the current block
-- Docker-ready
+- In-character AI chat (Gemini) with persistent memory
+- Per-guild `/language` (6 languages)
+- Companion landing site at lamar.hackatoa.com
 
-## Curfew configuration (env)
+## Tech Stack
 
-| Var | Required | Purpose |
-|-----|----------|---------|
-| `CALENDAR_ICAL_URL` | yes* | Secret iCal URL of the free-time calendar. **Unset → curfew is disabled (fails open, never kicks).** |
-| `TARGET_USER_ID` | no | User the curfew applies to. Default `651282581442002945`. |
-| `ENABLE_PRESENCE` | no | `true` to enable game-activity nudges. **Requires the "Presence Intent" toggle in the Discord Developer Portal**, else the bot won't start. Voice-kick works without it. |
-| `GAME_FILTER` | no | Only nudge when the game name contains this substring (case-insensitive). Empty = any game. |
+Node.js · discord.js · Gemini · Docker
 
-Event on the calendar = free time allowed. Outside events = curfew enforced.
+## Development
 
-The bot also needs the **Move Members** permission and a role above the target
-to disconnect them from voice.
+```bash
+npm install
+# set DISCORD + GEMINI keys in the environment, then:
+npm start
+```
 
-## Setup
+## Deployment
 
-1. Clone the repo:
-   ```bash
-   git clone https://github.com/Hackatoan/Lamar
-   cd Lamar
-   ```
+Docker on the homelab host; GHCR + Watchtower auto-deploy.
 
-2. Update `docker-compose.yml` with your credentials:
-   - `DISCORD_TOKEN` — your Discord bot token
-   - `GEMINI_API_KEY` — Google Gemini API key
-   - Any Google Search API credentials
+## Support
 
-3. Start the bot:
-   ```bash
-   docker compose up --build -d
-   ```
+If this project is useful to you, consider supporting development:
+
+☕ **[Buy Me a Coffee](https://buymeacoffee.com/hackatoa)**
 
 ---
 
-[hackatoa.com](https://hackatoa.com) · [GitHub](https://github.com/Hackatoan) · [Buy Me A Coffee](https://buymeacoffee.com/hackatoa)
+Part of the **[Hackatoa](https://hackatoa.com)** ecosystem — self-hosted apps, browser games, and bots. · [All repositories »](https://github.com/Hackatoan)
