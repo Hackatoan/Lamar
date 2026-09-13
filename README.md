@@ -1,5 +1,7 @@
 # Lamar
 
+> **🔗 Part of the Lamar project:** [Lamar](https://github.com/Hackatoan/Lamar) (Discord bot) · [lamar-web](https://github.com/Hackatoan/lamar-web) (landing site) · [lamarlive](https://github.com/Hackatoan/lamarlive) (/build gallery)
+
 An AI-powered Discord bot in the voice of Lamar Davis (GTA V), with persistent memory.
 
 🔗 **Live:** [lamar.hackatoa.com](https://lamar.hackatoa.com)   ·   ☕ **Support:** [Buy Me a Coffee](https://buymeacoffee.com/hackatoa)
