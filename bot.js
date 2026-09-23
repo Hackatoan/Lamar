@@ -132,6 +132,10 @@ async function llmChat(messages, modelIndex = 0, systemPrompt = SYSTEM_PROMPT) {
       }
     );
     req.on("error", (e) => llmChat(messages, modelIndex + 1, systemPrompt).then(resolve).catch(reject));
+    // No timeout previously meant a hung connection to any provider could
+    // stall a chat response indefinitely instead of falling through the
+    // fallback chain like every other failure mode already does.
+    req.setTimeout(20000, () => req.destroy(new Error(`${p.hostname} request timed out`)));
     req.write(body);
     req.end();
   });
