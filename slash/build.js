@@ -158,31 +158,41 @@ async function writeGallery(userId, displayName) {
 }
 
 // Send a job to the host builder and wait for its result file.
-function runBuild(prompt) {
+//
+// Polls with async fs calls (not sync) — this runs every 1.5s for up to
+// RESULT_TIMEOUT_MS (160s) on every /build and /edit call, and Node is
+// single-threaded, so sync fs calls here would repeatedly block the whole
+// bot's event loop (gateway events, other slash commands, curfew enforcer)
+// for the entire duration of every build job.
+async function runBuild(prompt) {
   const id = crypto.randomUUID();
   const jobPath = path.join(JOBS_DIR, "queue", id + ".json");
   const resPath = path.join(JOBS_DIR, "results", id + ".json");
-  fss.writeFileSync(jobPath, JSON.stringify({ id, prompt }));
-  return new Promise((resolve) => {
-    const started = Date.now();
-    const iv = setInterval(() => {
-      if (fss.existsSync(resPath)) {
-        clearInterval(iv);
-        let res;
-        try {
-          res = JSON.parse(fss.readFileSync(resPath, "utf8"));
-        } catch {
-          res = { ok: false, error: "couldn't read build result" };
-        }
-        try { fss.unlinkSync(resPath); } catch {}
-        resolve(res);
-      } else if (Date.now() - started > RESULT_TIMEOUT_MS) {
-        clearInterval(iv);
-        try { fss.unlinkSync(jobPath); } catch {}
-        resolve({ ok: false, error: "build timed out" });
+  await fs.writeFile(jobPath, JSON.stringify({ id, prompt }));
+  const started = Date.now();
+  for (;;) {
+    let raw;
+    try {
+      raw = await fs.readFile(resPath, "utf8");
+    } catch {
+      raw = null; // result not written yet (or unreadable) — keep polling
+    }
+    if (raw !== null) {
+      let res;
+      try {
+        res = JSON.parse(raw);
+      } catch {
+        res = { ok: false, error: "couldn't read build result" };
       }
-    }, 1500);
-  });
+      try { await fs.unlink(resPath); } catch {}
+      return res;
+    }
+    if (Date.now() - started > RESULT_TIMEOUT_MS) {
+      try { await fs.unlink(jobPath); } catch {}
+      return { ok: false, error: "build timed out" };
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
 }
 
 async function execute(interaction) {
