@@ -93,6 +93,10 @@ module.exports = (client, message, guild) => {
   }
 
   async function run() {
+    // Show a typing indicator while Gemini generates a reply so the user
+    // gets immediate feedback instead of a silent multi-second wait.
+    message.channel.sendTyping().catch(() => {});
+
     const chatSession = model.startChat({
       generationConfig,
       // safetySettings: Adjust safety settings
