@@ -65,6 +65,14 @@ const SYSTEM_PROMPT =
 
 const MAX_HISTORY = 40;
 
+// Per-user cooldown for the @mention chat trigger. Every other feature that
+// hits an LLM (/build, /edit) already gates behind a per-user cooldown —
+// this is the one path that didn't, so a user could spam-mention the bot to
+// fire unlimited calls through the whole provider fallback chain (cost, and
+// it can exhaust/rate-limit the chain for everyone else in the process).
+const MENTION_COOLDOWN_MS = parseInt(process.env.MENTION_COOLDOWN_MS, 10) || 5000;
+const lastMentionAt = new Map(); // userId -> timestamp of last accepted mention
+
 async function llmChat(messages, modelIndex = 0, systemPrompt = SYSTEM_PROMPT) {
   if (modelIndex >= CHAIN.length) throw new Error("all models exhausted");
   const { p, model } = CHAIN[modelIndex];
@@ -262,6 +270,12 @@ client.on("messageCreate", async (message) => {
   }
 
   if (content.startsWith(`<@${client.user.id}>`)) {
+    // Per-user cooldown — drop silently rather than hitting the LLM chain.
+    const now = Date.now();
+    const last = lastMentionAt.get(message.author.id) || 0;
+    if (now - last < MENTION_COOLDOWN_MS) return;
+    lastMentionAt.set(message.author.id, now);
+
     // Channel-scoped history so all users share context
     const historyKey = `channel_history_${message.channelId}`;
 
