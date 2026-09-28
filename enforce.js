@@ -101,11 +101,15 @@ async function onTargetLeave() {
 
 // ---- enforcement ------------------------------------------------------------
 
+// Returns true if the DM was delivered, false if it failed (e.g. DMs closed)
+// so callers can fall back to a visible in-server notice instead of the user
+// getting silently disconnected with no explanation at all.
 async function dm(user, text) {
   try {
     await user.send(text);
+    return true;
   } catch {
-    /* user may have DMs closed — ignore */
+    return false; // user may have DMs closed
   }
 }
 
@@ -119,12 +123,20 @@ async function enforceMember(member) {
 
   // 1) In a voice channel during curfew → disconnect.
   if (member.voice && member.voice.channelId) {
+    const vc = member.voice.channel; // grab before disconnecting so we can fall back to it
     try {
       await member.voice.disconnect("Outside designated free time");
-      await dm(
-        member.user,
-        "🚫 It ain't free time, homie. Get outta voice and go handle your business. Run `/bypass` if you wanna plead your case to the group."
-      );
+      const note =
+        "🚫 It ain't free time, homie. Get outta voice and go handle your business. Run `/bypass` if you wanna plead your case to the group.";
+      const delivered = await dm(member.user, note);
+      // DM failed (closed DMs) → without this he'd just get yanked from the
+      // call with zero explanation. Post in the voice channel's own text
+      // chat instead, so there's still a visible reason.
+      if (!delivered && vc) {
+        await vc
+          .send(`<@${member.id}> ${note} *(DMs closed, posting here instead)*`)
+          .catch((err) => console.error(`[enforce] fallback notice failed for ${member.id}:`, err.message));
+      }
     } catch (err) {
       console.error(`[enforce] couldn't disconnect ${member.id}:`, err.message);
     }
