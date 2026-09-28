@@ -3,12 +3,11 @@
 // tools disabled), and republishes to the same URL. NiggiWagas role only.
 
 const fs = require("fs/promises");
-const fss = require("fs");
 const path = require("path");
 const { SlashCommandBuilder } = require("discord.js");
 const storage = require("node-persist");
 const {
-  userDir, listBuilds, runBuild, writeGallery, slugify,
+  userDir, listBuilds, runBuild, writeGallery, slugify, pathExists,
   PUBLIC_BASE, BUILD_ROLE_ID, COOLDOWN_MS, guildId,
 } = require("./build.js");
 
@@ -42,7 +41,7 @@ async function execute(interaction) {
   if (
     !slug ||
     !path.resolve(buildDir).startsWith(path.resolve(dir) + path.sep) ||
-    !fss.existsSync(indexPath)
+    !(await pathExists(indexPath))
   ) {
     return interaction.reply({
       content: `No build named \`${slug}\`. Check \`/build list\`.`,

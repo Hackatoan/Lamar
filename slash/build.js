@@ -9,7 +9,6 @@
 //   /build delete name:<slug>
 
 const fs = require("fs/promises");
-const fss = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { SlashCommandBuilder } = require("discord.js");
@@ -84,6 +83,20 @@ function slugify(s) {
 
 function userDir(userId) {
   return path.join(PAGES_DIR, "u", userId);
+}
+
+// Async existence check — fs.existsSync is synchronous and, called from a
+// slash-command handler, blocks the bot's whole event loop (gateway events,
+// other commands, the curfew enforcer) for the duration of the stat syscall.
+// Same class of issue as the build-result poller fixed in PR #4, just smaller
+// per-call cost; this path is hit on every /build create and /build delete.
+async function pathExists(p) {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function listBuilds(userId) {
@@ -245,7 +258,7 @@ async function execute(interaction) {
     if (!slug || !path.resolve(target).startsWith(path.resolve(userDir(userId)) + path.sep)) {
       return interaction.reply({ content: "Bad build name.", ephemeral: true });
     }
-    if (!fss.existsSync(target)) {
+    if (!(await pathExists(target))) {
       return interaction.reply({ content: `No build named \`${slug}\`.`, ephemeral: true });
     }
     await fs.rm(target, { recursive: true, force: true });
@@ -280,7 +293,7 @@ async function execute(interaction) {
   let base = slugify(interaction.options.getString("name") || prompt) || "page";
   let slug = base;
   let n = 2;
-  while (fss.existsSync(path.join(userDir(userId), slug))) slug = `${base}-${n++}`;
+  while (await pathExists(path.join(userDir(userId), slug))) slug = `${base}-${n++}`;
 
   await storage.setItem(cdKey, Date.now());
   await interaction.reply(`🛠️ Lamar's cookin' up \`${slug}\`… gimme a minute.`);
@@ -363,7 +376,7 @@ async function adminExecute(interaction, sub) {
     if (!slug || !path.resolve(targetDir).startsWith(path.resolve(userDir(target.id)) + path.sep)) {
       return interaction.reply({ content: "Bad build name.", ephemeral: true });
     }
-    if (!fss.existsSync(targetDir)) {
+    if (!(await pathExists(targetDir))) {
       return interaction.reply({ content: `<@${target.id}> has no build \`${slug}\`.`, ephemeral: true });
     }
     await fs.rm(targetDir, { recursive: true, force: true });
@@ -392,6 +405,7 @@ module.exports = {
   runBuild,
   writeGallery,
   slugify,
+  pathExists,
   PUBLIC_BASE,
   BUILD_ROLE_ID,
   COOLDOWN_MS,
