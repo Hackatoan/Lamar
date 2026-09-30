@@ -99,6 +99,11 @@ async function pathExists(p) {
   }
 }
 
+// Reads each build's meta.json in parallel rather than one at a time — this
+// runs on every /build list, /build create (cap check), /build delete, and
+// every /edit (via writeGallery), so an N+1 sequential-await loop here adds
+// up to MAX_BUILDS serialized disk reads per call for no reason: each file
+// read is independent, so there's nothing to wait on between them.
 async function listBuilds(userId) {
   const dir = userDir(userId);
   let entries;
@@ -107,17 +112,19 @@ async function listBuilds(userId) {
   } catch {
     return [];
   }
-  const builds = [];
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    let meta = { title: e.name, prompt: "", created: null };
-    try {
-      meta = { ...meta, ...JSON.parse(await fs.readFile(path.join(dir, e.name, "meta.json"), "utf8")) };
-    } catch {
-      /* no meta — use defaults */
-    }
-    builds.push({ slug: e.name, ...meta });
-  }
+  const builds = await Promise.all(
+    entries
+      .filter((e) => e.isDirectory())
+      .map(async (e) => {
+        let meta = { title: e.name, prompt: "", created: null };
+        try {
+          meta = { ...meta, ...JSON.parse(await fs.readFile(path.join(dir, e.name, "meta.json"), "utf8")) };
+        } catch {
+          /* no meta — use defaults */
+        }
+        return { slug: e.name, ...meta };
+      })
+  );
   builds.sort((a, b) => (b.created || 0) - (a.created || 0));
   return builds;
 }
