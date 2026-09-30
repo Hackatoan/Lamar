@@ -263,7 +263,15 @@ client.on("messageCreate", async (message) => {
     const commandName = args[0] ? args[0].toLowerCase() : "help";
     const command = client.commands.get(commandName);
     if (command) {
-      command.execute(client, message, args.slice(1));
+      // Slash commands already catch execute() errors and tell the user
+      // something broke (see interactionCreate below); this prefix-command
+      // path didn't, so a throwing handler failed completely silently.
+      try {
+        await command.execute(client, message, args.slice(1));
+      } catch (err) {
+        console.error(`Command "${commandName}" error:`, err.message);
+        message.channel.send("Something broke running that command.").catch(() => {});
+      }
     } else {
       message.channel.send(`Unknown command: ${commandName}`);
     }
