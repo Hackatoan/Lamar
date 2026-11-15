@@ -14,6 +14,7 @@ A character Discord bot that chats in-persona using an LLM, remembers context, a
 
 - In-character AI chat (Gemini) with persistent memory
 - Per-guild `/language` (6 languages)
+- `lamar 8ball <question>` — Magic 8-Ball answers in Lamar's voice (no LLM call)
 - Companion landing site at lamar.hackatoa.com
 
 ## Tech Stack
