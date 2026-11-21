@@ -73,6 +73,36 @@ const MAX_HISTORY = 40;
 const MENTION_COOLDOWN_MS = parseInt(process.env.MENTION_COOLDOWN_MS, 10) || 5000;
 const lastMentionAt = new Map(); // userId -> timestamp of last accepted mention
 
+// In-memory cache for channel histories to reduce persistent storage I/O.
+// Keeps recently-accessed channel histories cached with TTL-based eviction.
+const historyCache = new Map(); // channelId -> history array
+const historyCacheTTL = new Map(); // channelId -> last access timestamp
+const HISTORY_CACHE_TTL_MS = 60000; // 1 minute — expire entries to prevent unbounded memory growth
+
+function getCachedHistory(historyKey) {
+  const cached = historyCache.get(historyKey);
+  if (cached) {
+    historyCacheTTL.set(historyKey, Date.now());
+    return cached;
+  }
+  return null;
+}
+
+async function getHistory(historyKey) {
+  const cached = getCachedHistory(historyKey);
+  if (cached) return cached;
+  const history = (await storage.getItem(historyKey)) || [];
+  historyCache.set(historyKey, history);
+  historyCacheTTL.set(historyKey, Date.now());
+  return history;
+}
+
+function saveHistory(historyKey, history) {
+  historyCache.set(historyKey, history);
+  historyCacheTTL.set(historyKey, Date.now());
+  storage.setItem(historyKey, history).catch((err) => console.error("History save error:", err.message));
+}
+
 async function llmChat(messages, modelIndex = 0, systemPrompt = SYSTEM_PROMPT) {
   if (modelIndex >= CHAIN.length) throw new Error("all models exhausted");
   const { p, model } = CHAIN[modelIndex];
@@ -203,6 +233,17 @@ client.on("ready", async () => {
     }
   }
 
+  // History cache eviction: remove stale entries after TTL expires
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, timestamp] of historyCacheTTL.entries()) {
+      if (now - timestamp > HISTORY_CACHE_TTL_MS) {
+        historyCache.delete(key);
+        historyCacheTTL.delete(key);
+      }
+    }
+  }, HISTORY_CACHE_TTL_MS);
+
   // Gaming-curfew enforcer ("is gianni locked"). Off unless ENABLE_CURFEW=true.
   if (process.env.ENABLE_CURFEW === "true") {
     enforce.start(client);
@@ -287,7 +328,7 @@ client.on("messageCreate", async (message) => {
     // Channel-scoped history so all users share context
     const historyKey = `channel_history_${message.channelId}`;
 
-    let history = (await storage.getItem(historyKey)) || [];
+    let history = await getHistory(historyKey);
 
     const userMessage = message.content
       .replace(`<@!${client.user.id}>`, "")
@@ -314,7 +355,7 @@ client.on("messageCreate", async (message) => {
       if (history.length > MAX_HISTORY * 2) {
         history = history.slice(-MAX_HISTORY * 2);
       }
-      await storage.setItem(historyKey, history);
+      saveHistory(historyKey, history);
 
       await message.channel.send(`<@${message.author.id}> ${response}`);
     } catch (error) {
